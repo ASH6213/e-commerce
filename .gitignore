@@ -1,0 +1,32 @@
+﻿# Global
+.DS_Store
+Thumbs.db
+*.log
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.local.template
+
+# Node / Next.js
+node_modules/
+front/.next/
+front/out/
+front/.turbo/
+front/.vercel/
+
+# PHP / Laravel
+backend/vendor/
+backend/.env
+backend/public/storage/
+
+# Ignore storage contents but keep .gitignore placeholders
+backend/storage/**
+!backend/storage/
+!backend/storage/**/
+!backend/storage/**/.gitignore
+
+# IDE
+.vscode/
+.idea/
