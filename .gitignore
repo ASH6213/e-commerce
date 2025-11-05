@@ -1,32 +1,74 @@
 ﻿# Global
+# ==========================================
+# 🌍 Global / System
+# ==========================================
 .DS_Store
 Thumbs.db
 *.log
-
+*.zip
+*.tar
+*.gz
+*.backup.*
+*.pem
 # Env
+# ==========================================
+# ⚙️ Environment files
+# ==========================================
 .env
 .env.*
 !.env.example
 !.env.local.template
-
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 # Node / Next.js
 node_modules/
+# ==========================================
+# ⚛️ Frontend (Next.js / React)
+# ==========================================
+front/node_modules/
 front/.next/
 front/out/
+front/build/
 front/.turbo/
 front/.vercel/
-
+front/coverage/
+front/package-lock.json
+front/yarn.lock
+front/npm-debug.log*
+front/yarn-debug.log*
+front/yarn-error.log*
+**/public/workbox-*.js
+**/public/sw.js
+**/public/worker-*.js
 # PHP / Laravel
+# ==========================================
+# 🐘 Backend (Laravel)
+# ==========================================
 backend/vendor/
+backend/composer.lock
 backend/.env
+backend/.env.*
 backend/public/storage/
-
 # Ignore storage contents but keep .gitignore placeholders
+# Ignore storage contents but keep folder structure
 backend/storage/**
 !backend/storage/
 !backend/storage/**/
 !backend/storage/**/.gitignore
-
 # IDE
+# ==========================================
+# 🧠 IDE & Editor
+# ==========================================
 .vscode/
 .idea/
+.idea/
+*.code-workspace
+# ==========================================
+# 🧪 Testing / Temporary / Cache
+# ==========================================
+coverage/
+tmp/
+temp/
+.cache/
