@@ -41,6 +41,9 @@ const useProvideCart = () => {
             price: Number(p?.price ?? it.price),
             img1: images.length > 0 ? images[0] : it.img1,
             img2: images.length > 1 ? images[1] : it.img2,
+            // Keep branch-aware stock for UI and add-to-cart capping
+            ...(typeof p?.branch_stock === 'number' ? { branch_stock: p.branch_stock } : {}),
+            ...(typeof p?.stock === 'number' ? { stock: p.stock } : {}),
           } as itemType;
         } catch (_e) {
           return it;
@@ -79,6 +82,8 @@ const useProvideCart = () => {
                     price: Number(p?.price ?? it.price),
                     img1: images.length > 0 ? images[0] : it.img1,
                     img2: images.length > 1 ? images[1] : it.img2,
+                    ...(typeof p?.branch_stock === 'number' ? { branch_stock: p.branch_stock } : {}),
+                    ...(typeof p?.stock === 'number' ? { stock: p.stock } : {}),
                   } as itemType;
                 } catch (_e) {
                   return it;

@@ -15,6 +15,17 @@ const addItemToCart = (
           ? (itemQty = cartItem.qty! + 1)
           : (itemQty = cartItem.qty! + item.qty!);
 
+        // Cap by available stock if provided (branch-aware first)
+        const maxAvailable =
+          typeof item.branch_stock === 'number'
+            ? item.branch_stock
+            : typeof item.stock === 'number'
+            ? item.stock
+            : undefined;
+        if (typeof maxAvailable === 'number') {
+          itemQty = Math.max(0, Math.min(itemQty, maxAvailable));
+        }
+
         // Update all fields from new item, not just quantity
         return {
           ...cartItem,
@@ -31,6 +42,16 @@ const addItemToCart = (
   // console.log(itemQty);
   let itemQty = 0;
   !item.qty ? itemQty++ : (itemQty = item.qty);
+  // Cap by available stock for initial add
+  const maxAvailable =
+    typeof item.branch_stock === 'number'
+      ? item.branch_stock
+      : typeof item.stock === 'number'
+      ? item.stock
+      : undefined;
+  if (typeof maxAvailable === 'number') {
+    itemQty = Math.max(0, Math.min(itemQty, maxAvailable));
+  }
   return [
     ...cartItems,
     {
@@ -40,6 +61,9 @@ const addItemToCart = (
       img1: item.img1,
       img2: item.img2,
       qty: itemQty,
+      // Persist branch-aware available stock if present
+      ...(typeof item.branch_stock === 'number' ? { branch_stock: item.branch_stock } : {}),
+      ...(typeof item.stock === 'number' ? { stock: item.stock } : {}),
     },
   ];
 };

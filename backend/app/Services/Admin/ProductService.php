@@ -83,4 +83,14 @@ class ProductService
     {
         return $this->productRepository->getAllBranchStocks($productId);
     }
+
+    /**
+     * Get products with optional filters (e.g., branch-aware pricing)
+     * For admin we often want to include inactive as well, so pass
+     * ['is_active' => null] to disable the default active-only filter.
+     */
+    public function getProductsWithFilters(array $filters = []): \Illuminate\Support\Collection
+    {
+        return $this->productRepository->getProductsWithFilters($filters);
+    }
 }

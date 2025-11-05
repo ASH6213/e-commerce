@@ -11,6 +11,7 @@ type Props = {
   onAdd?: () => void;
   onRemove?: () => void;
   onDelete?: () => void;
+  canAddMore?: boolean;
 };
 
 const Item: FC<Props> = ({
@@ -21,6 +22,7 @@ const Item: FC<Props> = ({
   onAdd,
   onRemove,
   onDelete,
+  canAddMore = true,
 }) => {
   const src = resolveImageUrl(img as string);
   return (
@@ -44,8 +46,8 @@ const Item: FC<Props> = ({
             {qty}
           </div>
           <div
-            onClick={onAdd}
-            className="h-full w-12 flex justify-center items-center cursor-pointer hover:bg-gray500 hover:text-gray100"
+            onClick={() => { if (canAddMore && onAdd) onAdd(); }}
+            className={`h-full w-12 flex justify-center items-center ${canAddMore ? 'cursor-pointer hover:bg-gray500 hover:text-gray100' : 'opacity-50 cursor-not-allowed'}`}
           >
             +
           </div>

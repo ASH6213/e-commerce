@@ -204,6 +204,7 @@ const Product: React.FC<Props> = ({ product, products }) => {
                     width={1000}
                     height={1282}
                     alt={product.name}
+                    priority
                   />
                 </SwiperSlide>
                 <SwiperSlide>
@@ -224,6 +225,7 @@ const Product: React.FC<Props> = ({ product, products }) => {
                     width={1000}
                     height={1282}
                     alt={product.name}
+                    priority
                   />
                 )}
               </div>
@@ -291,12 +293,18 @@ const Product: React.FC<Props> = ({ product, products }) => {
                 <div className="h-full w-28 sm:w-12 flex justify-center items-center pointer-events-none">
                   {currentQty}
                 </div>
-                <div
-                  onClick={() => setCurrentQty((prevState) => prevState + 1)}
-                  className="h-full w-full sm:w-12 flex justify-center items-center cursor-pointer hover:bg-gray500 hover:text-gray100"
-                >
-                  +
-                </div>
+                {(() => {
+                  const max = typeof branchStock === 'number' ? branchStock : undefined;
+                  const disabled = typeof max === 'number' && currentQty >= max;
+                  return (
+                    <div
+                      onClick={() => { if (!disabled) setCurrentQty((prevState) => prevState + 1); }}
+                      className={`h-full w-full sm:w-12 flex justify-center items-center ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-gray500 hover:text-gray100'}`}
+                    >
+                      +
+                    </div>
+                  );
+                })()}
               </div>
               <div className="flex h-12 space-x-4 w-full">
                 {branchStock !== undefined && branchStock !== null && branchStock === 0 ? (

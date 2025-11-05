@@ -13,10 +13,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withProviders([
-        App\Providers\RepositoryServiceProvider::class,
+		App\Providers\RepositoryServiceProvider::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
-                $middleware->api(prepend: [
+        $middleware->api(prepend: [
             \Illuminate\Http\Middleware\HandleCors::class,
         ]);
         // Route middleware aliases

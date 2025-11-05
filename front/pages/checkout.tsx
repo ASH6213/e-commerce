@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { api } from "../lib/api";
 import Image from "next/image";
 import { GetStaticProps } from "next";
-import { getCookie } from "cookies-next";
+import { getCookie, setCookie, deleteCookie } from "cookies-next";
+import { useRouter } from "next/router";
 
 import Header from "../components/Header/Header";
 import Footer from "../components/Footer/Footer";
@@ -37,6 +38,7 @@ const ShoppingCart = () => {
   const t = useTranslations("CartWishlist");
   const { cart, clearCart } = useCart();
   const auth = useAuth();
+  const router = useRouter();
   const [deli, setDeli] = useState<DeliveryType>("STORE_PICKUP");
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentType>("CASH_ON_DELIVERY");
@@ -54,17 +56,156 @@ const ShoppingCart = () => {
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
   const [orderError, setOrderError] = useState("");
   const [sendEmail, setSendEmail] = useState(false);
+  const [stockStatus, setStockStatus] = useState<Record<number, { available: number; inStock: boolean }>>({});
+  const [priceChanges, setPriceChanges] = useState<Array<{ id: number; name: string; oldPrice: number; newPrice: number }>>([]);
+  const [currentPrices, setCurrentPrices] = useState<Record<number, number>>({});
+  const [stockDataLoaded, setStockDataLoaded] = useState(false);
+  const [holdKey, setHoldKey] = useState<string | null>(null);
 
   const products = cart.map((item) => ({
     id: item.id,
     quantity: item.qty,
   }));
 
+  // Hold stock while on checkout
+  useEffect(() => {
+    let interval: any = null;
+    const currentHold = (getCookie('hold_key') as string) || null;
+    if (currentHold) setHoldKey(currentHold);
+
+    const createOrRefreshHold = async () => {
+      try {
+        if (cart.length === 0) return;
+        const branchId = getCookie('branch_id');
+        const payload: any = {
+          products: products.map(p => ({ id: p.id, quantity: p.quantity || 1 })),
+          ttl_seconds: 600,
+        };
+        if (holdKey) payload.holdKey = holdKey;
+        if (branchId) payload.branchId = Number(branchId);
+        const res = await api.post(`/api/v1/stock/hold`, payload);
+        const key = res.data?.holdKey as string | undefined;
+        if (key && key !== holdKey) {
+          setHoldKey(key);
+          setCookie('hold_key', key, { path: '/', maxAge: 600, sameSite: 'lax' });
+        }
+      } catch (e) {
+        // Silent fail; checkout can still proceed without hold
+        // eslint-disable-next-line no-console
+        console.warn('Hold refresh failed', e);
+      }
+    };
+
+    // Create/refresh immediately and then every 5 minutes
+    if (cart.length > 0) {
+      createOrRefreshHold();
+      interval = setInterval(createOrRefreshHold, 5 * 60 * 1000);
+    }
+
+    const releaseOnUnload = (ev: any) => {
+      try {
+        const key = (getCookie('hold_key') as string) || holdKey;
+        if (!key) return;
+        const url = `${api.defaults.baseURL || ''}/api/v1/stock/release`;
+        const blob = new Blob([JSON.stringify({ holdKey: key })], { type: 'application/json' });
+        if (navigator.sendBeacon) navigator.sendBeacon(url, blob);
+      } catch (_) {}
+    };
+    window.addEventListener('beforeunload', releaseOnUnload);
+
+    return () => {
+      if (interval) clearInterval(interval);
+      window.removeEventListener('beforeunload', releaseOnUnload);
+      // If leaving checkout, proactively release hold
+      const key = (getCookie('hold_key') as string) || holdKey;
+      if (key) {
+        api.post(`/api/v1/stock/release`, { holdKey: key }).catch(() => {});
+        deleteCookie('hold_key', { path: '/' });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart.map(i => `${i.id}:${i.qty}`).join(',' )]);
+
+  // Check stock availability and prices for all cart items
+  useEffect(() => {
+    const checkStockAndPrices = async () => {
+      if (cart.length === 0) {
+        setStockStatus({});
+        setCurrentPrices({});
+        setPriceChanges([]);
+        setStockDataLoaded(false);
+        return;
+      }
+
+      const branchId = getCookie('branch_id') as string;
+      
+      const statusMap: Record<number, { available: number; inStock: boolean }> = {};
+      const pricesMap: Record<number, number> = {};
+      const changes: Array<{ id: number; name: string; oldPrice: number; newPrice: number }> = [];
+      
+      await Promise.all(
+        cart.map(async (item) => {
+          try {
+            const res = await api.get(`/api/v1/products/${item.id}`, {
+              params: branchId ? { branch_id: branchId } : undefined,
+            });
+            const product = res.data;
+            
+            // Check stock
+            let availableStock = product.stock || 0;
+            if (branchId && product.branch_stock !== undefined) {
+              availableStock = product.branch_stock;
+            }
+            
+            statusMap[item.id] = {
+              available: availableStock,
+              inStock: availableStock >= (item.qty || 1),
+            };
+            
+            // Check price changes
+            const currentPrice = Number(product.price || 0);
+            pricesMap[item.id] = currentPrice;
+            
+            // Detect price change (with tolerance for floating point)
+            if (Math.abs(currentPrice - item.price) > 0.01) {
+              changes.push({
+                id: item.id,
+                name: item.name,
+                oldPrice: item.price,
+                newPrice: currentPrice,
+              });
+            }
+            
+          } catch (e) {
+            console.error('Failed to check product data for:', item.id);
+            statusMap[item.id] = { available: 0, inStock: false };
+            pricesMap[item.id] = item.price;
+          }
+        })
+      );
+      
+      setStockStatus(statusMap);
+      setCurrentPrices(pricesMap);
+      setPriceChanges(changes);
+      setStockDataLoaded(true);
+    };
+
+    checkStockAndPrices();
+    
+    // Refresh every 30 seconds to catch price changes
+    const interval = setInterval(checkStockAndPrices, 30000);
+    
+    return () => clearInterval(interval);
+  }, [cart]);
+
+  // Check if any items are out of stock
+  const hasOutOfStockItems = Object.values(stockStatus).some(status => !status.inStock);
+
   useEffect(() => {
     if (!isOrdering) return;
 
     setErrorMsg("");
-
+    // Place order for both guests and logged-in users
     const makeOrder = async () => {
       try {
         const branchId = getCookie("branch_id");
@@ -77,22 +218,39 @@ const ShoppingCart = () => {
           deliveryType: deli,
           products,
           ...(branchId ? { branchId: Number(branchId) } : {}),
+          ...(holdKey ? { holdKey } : {}),
           sendEmail,
         });
         if (res.data?.success) {
           setCompletedOrder(res.data.data);
           clearCart!();
+          if (holdKey) {
+            deleteCookie('hold_key', { path: '/' });
+            setHoldKey(null);
+          }
         } else {
           setOrderError("error_occurs");
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Order creation error:", error);
-        setOrderError("error_occurs");
+        
+        // Check if it's a stock-related error
+        if (error.response?.status === 422 && error.response?.data) {
+          const errorData = error.response.data;
+          if (errorData.product_id && errorData.available_quantity !== undefined) {
+            setOrderError(
+              `المنتج غير متوفر بالكمية المطلوبة. المتوفر: ${errorData.available_quantity} فقط`
+            );
+          } else {
+            setOrderError(errorData.error || "error_occurs");
+          }
+        } else {
+          setOrderError("error_occurs");
+        }
       } finally {
         setIsOrdering(false);
       }
     };
-    // Place order for both guests and logged-in users
     makeOrder();
   }, [isOrdering, auth.user]);
 
@@ -118,22 +276,26 @@ const ShoppingCart = () => {
       email !== "" &&
       phone !== "" &&
       address !== "" &&
-      password !== ""
+      password !== "" &&
+      !hasOutOfStockItems
         ? false
         : true;
   } else {
     disableOrder =
-      name !== "" && email !== "" && phone !== "" && address !== ""
+      name !== "" && email !== "" && phone !== "" && address !== "" && !hasOutOfStockItems
         ? false
         : true;
   }
 
+  // Calculate subtotal using current prices if available, otherwise use cart prices
   let subtotal: number | string = 0;
 
   subtotal = roundDecimal(
     cart.reduce(
-      (accumulator: number, currentItem: itemType) =>
-        accumulator + currentItem.price * currentItem!.qty!,
+      (accumulator: number, currentItem: itemType) => {
+        const price = currentPrices[currentItem.id] ?? currentItem.price;
+        return accumulator + price * currentItem!.qty!;
+      },
       0
     )
   );
@@ -156,6 +318,32 @@ const ShoppingCart = () => {
           <h1 className="text-2xl sm:text-4xl text-center sm:text-left mt-6 mb-2 animatee__animated animate__bounce">
             {t("checkout")}
           </h1>
+          
+          {/* Price Change Warning */}
+          {priceChanges.length > 0 && (
+            <div className="mt-4 p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
+              <p className="text-blue-800 text-sm font-bold mb-2">
+                ℹ️ تم تحديث الأسعار
+              </p>
+              <p className="text-blue-700 text-sm mb-2">
+                تغيرت أسعار بعض المنتجات في سلتك:
+              </p>
+              <ul className="text-xs text-blue-600">
+                {priceChanges.map(change => (
+                  <li key={change.id} className="mt-1">
+                    • {change.name}: 
+                    <span className={change.newPrice > change.oldPrice ? 'text-red-600' : 'text-green-600'}>
+                      {' '}${roundDecimal(change.oldPrice)} → ${roundDecimal(change.newPrice)}
+                      {change.newPrice > change.oldPrice ? ' ⬆️' : ' ⬇️'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-blue-600 mt-2">
+                الإجمالي الجديد: ${subtotal}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* ===== Form Section ===== */}
@@ -312,17 +500,30 @@ const ShoppingCart = () => {
                 </div>
 
                 <div className="pt-2">
-                  {cart.map((item) => (
-                    <div className="flex justify-between mb-2" key={item.id}>
-                      <span className="text-base font-medium">
-                        {item.name}{" "}
-                        <span className="text-gray400">x {item.qty}</span>
-                      </span>
-                      <span className="text-base">
-                        $ {roundDecimal(item.price * item!.qty!)}
-                      </span>
-                    </div>
-                  ))}
+                  {cart.map((item) => {
+                    const currentPrice = currentPrices[item.id] ?? item.price;
+                    const priceChanged = Math.abs(currentPrice - item.price) > 0.01;
+                    
+                    return (
+                      <div className="flex justify-between mb-2" key={item.id}>
+                        <span className="text-base font-medium">
+                          {item.name}{" "}
+                          <span className="text-gray400">x {item.qty}</span>
+                          {priceChanged && (
+                            <span className="ml-1 text-xs text-blue-600">🔄</span>
+                          )}
+                        </span>
+                        <span className="text-base">
+                          {priceChanged && (
+                            <span className="line-through text-gray400 text-xs mr-2">
+                              $ {roundDecimal(item.price * item!.qty!)}
+                            </span>
+                          )}
+                          $ {roundDecimal(currentPrice * item!.qty!)}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="py-3 flex justify-between">
@@ -498,17 +699,54 @@ const ShoppingCart = () => {
                 </div>
 
                 <Button
-                  value={isOrdering ? "Processing..." : t("place_order")}
+                  value={
+                    hasOutOfStockItems 
+                      ? "❌ بعض المنتجات غير متوفرة" 
+                      : isOrdering 
+                      ? "جاري المعالجة..." 
+                      : t("place_order")
+                  }
                   size="xl"
-                  extraClass={`w-full`}
-                  onClick={() => !isOrdering && setIsOrdering(true)}
-                  disabled={disableOrder || isOrdering}
+                  extraClass={`w-full ${hasOutOfStockItems ? 'bg-red-600 hover:bg-red-700 opacity-75' : ''}`}
+                  onClick={() => !isOrdering && !hasOutOfStockItems && setIsOrdering(true)}
+                  disabled={disableOrder || isOrdering || hasOutOfStockItems}
                 />
               </div>
 
+              {/* Stock Warning at checkout */}
+              {hasOutOfStockItems && (
+                <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 rounded">
+                  <p className="text-red-800 text-sm font-bold mb-2">
+                    ⚠️ لا يمكنك إكمال الطلب
+                  </p>
+                  <p className="text-red-700 text-sm mb-2">
+                    بعض المنتجات في السلة غير متوفرة بالكمية المطلوبة:
+                  </p>
+                  <ul className="text-xs text-red-600">
+                    {cart.filter(item => {
+                      const stock = stockStatus[item.id];
+                      return stock && !stock.inStock;
+                    }).map(item => {
+                      const stock = stockStatus[item.id];
+                      return (
+                        <li key={item.id} className="mt-1">
+                          • {item.name}: طلبت {item.qty} لكن المتوفر {stock?.available || 0} فقط
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <button
+                    onClick={() => router.push('/shopping-cart')}
+                    className="mt-3 text-sm text-red-800 underline font-semibold hover:text-red-900"
+                  >
+                    ← ارجع للسلة لتعديل الكميات
+                  </button>
+                </div>
+              )}
+              
               {orderError !== "" && (
-                <span className="text-red text-sm font-semibold">
-                  - {orderError}
+                <span className="text-red text-sm font-semibold block mb-4">
+                  {orderError}
                 </span>
               )}
             </div>

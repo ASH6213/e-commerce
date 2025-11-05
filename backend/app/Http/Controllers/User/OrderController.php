@@ -9,6 +9,8 @@ use App\Services\User\OrderService;
 use App\Services\User\ProductService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Events\ProductStockUpdated;
+use App\Models\Product;
 
 class OrderController extends Controller
 {
@@ -54,6 +56,7 @@ class OrderController extends Controller
 
         // Get branch_id from request (accept both branchId and branch_id)
         $branchId = (int) ($validated['branchId'] ?? $request->input('branch_id', 0));
+        $holdKey = (string) $request->input('holdKey', $request->input('hold_key', (string)($request->cookie('hold_key') ?? '')));
 
         // Build order items from product catalog with branch-specific prices
         $items = [];
@@ -69,12 +72,24 @@ class OrderController extends Controller
                 $branchStock = $this->products->getBranchStock($product->id, $branchId);
                 
                 // Validate stock availability
-                if (!$branchStock || (int)$branchStock->quantity < $qty) {
+                if (!$branchStock) {
+                    return response()->json([
+                        'success' => false,
+                        'error' => "Product '{$product->name}' is out of stock at selected branch.",
+                        'product_id' => $product->id,
+                        'available_quantity' => 0,
+                        'requested_quantity' => $qty
+                    ], 422);
+                }
+                // Available for this order = total branch qty - other active holds (exclude this holdKey)
+                $available = app(\App\Repositories\ProductRepository::class)
+                    ->getAvailableBranchQuantity($product->id, $branchId, $holdKey ?: null);
+                if ($available < $qty) {
                     return response()->json([
                         'success' => false,
                         'error' => "Product '{$product->name}' is out of stock or insufficient quantity at selected branch.",
                         'product_id' => $product->id,
-                        'available_quantity' => $branchStock ? (int)$branchStock->quantity : 0,
+                        'available_quantity' => $available,
                         'requested_quantity' => $qty
                     ], 422);
                 }
@@ -87,6 +102,18 @@ class OrderController extends Controller
             } else {
                 // No branch selected, use regular price
                 $price = (float) ($product->sale_price ?? $product->price ?? 0);
+                // Enforce global stock availability when no branch is specified, subtracting other holds
+                $available = app(\App\Repositories\ProductRepository::class)
+                    ->getAvailableGlobalQuantity($product->id, $holdKey ?: null);
+                if ($available < $qty) {
+                    return response()->json([
+                        'success' => false,
+                        'error' => "Product '{$product->name}' has insufficient stock.",
+                        'product_id' => $product->id,
+                        'available_quantity' => $available,
+                        'requested_quantity' => $qty
+                    ], 422);
+                }
             }
             
             $items[] = [
@@ -125,15 +152,39 @@ class OrderController extends Controller
         // Broadcast order created event
         event(new OrderCreated($order));
 
-        // Decrement branch stock if branch_id is provided (reuse same branchId)
+        // Decrement stock after order creation
         if ($branchId > 0) {
+            // Per-branch stock decrement + recompute total
             foreach ($items as $it) {
                 $branchStock = $this->products->getBranchStock($it['product_id'], $branchId);
                 if ($branchStock) {
+                    $productModel = Product::find($it['product_id']);
+                    $oldStock = $productModel ? (int)$productModel->stock : 0;
                     $newQty = max(0, (int)$branchStock->quantity - (int)$it['quantity']);
                     $this->products->updateBranchStock($it['product_id'], $branchId, $newQty);
+                    if ($productModel) {
+                        $fresh = $productModel->fresh();
+                        event(new ProductStockUpdated($fresh, $oldStock));
+                    }
                 }
             }
+        } else {
+            // Global stock decrement
+            foreach ($items as $it) {
+                $productModel = Product::find($it['product_id']);
+                if ($productModel) {
+                    $oldStock = (int)$productModel->stock;
+                    $newStock = max(0, $oldStock - (int)$it['quantity']);
+                    $this->products->updateStock($it['product_id'], $newStock);
+                    $fresh = $productModel->fresh();
+                    event(new ProductStockUpdated($fresh, $oldStock));
+                }
+            }
+        }
+
+        // Consume holds for this checkout key, if provided
+        if ($holdKey) {
+            \App\Models\ProductStockHold::where('hold_key', $holdKey)->delete();
         }
 
         $createdAt = method_exists($order, 'getAttribute') && $order->getAttribute('created_at')

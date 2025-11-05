@@ -30,6 +30,7 @@ class ProductResource extends JsonResource
             'images' => is_array($this->images) ? $this->images : [],
             'is_active' => (bool) ($this->is_active ?? false),
             'is_featured' => (bool) ($this->is_featured ?? false),
+            'category_id' => $this->category_id ? (int) $this->category_id : null,
             'category' => $this->whenLoaded('category', function () {
                 return [
                     'id' => (int) $this->category->id,

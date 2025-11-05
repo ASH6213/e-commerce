@@ -22,9 +22,14 @@ class AuthService
             throw new \Exception('User with this email already exists');
         }
 
-        // Create user
-        $userData = $dto->toArray();
-        $userData['password'] = Hash::make($dto->password);
+        // Create user (only core columns, avoid requiring extra migrations)
+        // We intentionally ignore optional fields (phone, shipping_address)
+        // so that the default users table works without additional columns.
+        $userData = [
+            'email' => $dto->email,
+            'name' => $dto->fullname,
+            'password' => Hash::make($dto->password),
+        ];
         
         $user = $this->users->create($userData);
 
@@ -37,6 +42,7 @@ class AuthService
                 'id' => $user->id,
                 'fullname' => $user->name,
                 'email' => $user->email,
+                // Optional fields omitted from persistence if columns don't exist
                 'phone' => $user->phone ?? null,
                 'shippingAddress' => $user->shipping_address ?? null,
             ],

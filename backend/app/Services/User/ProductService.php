@@ -41,6 +41,11 @@ class ProductService
     {
         $product = $this->productRepository->findById($id);
         if (!$product || !$branchId) {
+            if ($product && !$branchId) {
+                // Adjust global stock by active holds (no hold exclusion here)
+                $available = $this->productRepository->getAvailableGlobalQuantity($product->id);
+                $product->stock = $available;
+            }
             return $product;
         }
 
@@ -49,7 +54,8 @@ class ProductService
             if ($branchStock->price_override !== null) {
                 $product->price = (float) $branchStock->price_override;
             }
-            $product->branch_stock = (int) ($branchStock->quantity ?? 0);
+            $available = $this->productRepository->getAvailableBranchQuantity($id, $branchId);
+            $product->branch_stock = $available;
         } else {
             $product->branch_stock = 0;
         }
@@ -65,5 +71,10 @@ class ProductService
     public function updateBranchStock(int $productId, int $branchId, int $quantity): bool
     {
         return $this->productRepository->updateBranchStock($productId, $branchId, $quantity);
+    }
+
+    public function updateStock(int $productId, int $quantity): bool
+    {
+        return $this->productRepository->updateStock($productId, $quantity);
     }
 }

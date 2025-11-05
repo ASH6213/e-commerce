@@ -16,6 +16,7 @@ use App\Http\Controllers\User\AuthController as UserAuthController;
 use App\Http\Controllers\User\BranchController;
 use App\Http\Controllers\User\CategoryController;
 use App\Http\Controllers\User\WishlistController;
+use App\Http\Controllers\User\StockController;
 
 /*
 |--------------------------------------------------------------------------
@@ -49,6 +50,9 @@ Route::get('/health', fn () => response()->json(['status' => 'ok']));
         // Public orders
         Route::post('/orders', [OrderController::class, 'store']);
         Route::get('/orders/mine', [OrderController::class, 'mine']);
+        // Stock holds for checkout
+        Route::post('/stock/hold', [StockController::class, 'hold']);
+        Route::post('/stock/release', [StockController::class, 'release']);
         
         // Wishlist routes
         Route::get('/wishlist', [WishlistController::class, 'index']);

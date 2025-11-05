@@ -11,6 +11,7 @@ use App\Http\Controllers\Controller;
 use App\Services\Admin\ProductService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Models\Product;
 
 class ProductController extends Controller
 {
@@ -20,9 +21,32 @@ class ProductController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $perPage = $request->get('per_page', 15);
-        $products = $this->productService->getPaginatedProducts($perPage);
+        $perPage = $request->get('per_page');
+        $branchId = $request->integer('branch_id');
 
+        // Admin needs to see all products by default (including inactive).
+        // If per_page is 'all' or not provided, return full list with optional branch-aware pricing.
+        if ($perPage === null || $perPage === 'all' || (is_numeric($perPage) && (int)$perPage <= 0)) {
+            $filters = [
+                // Disable the default active-only filter inside repository
+                'is_active' => null,
+                // Be generous but bounded in case of very large catalogs
+                'limit' => (int) ($request->get('limit', 10000)),
+                'offset' => (int) ($request->get('offset', 0)),
+            ];
+            // Include soft-deleted only if explicitly requested
+            if ($request->boolean('with_trashed')) {
+                $filters['with_trashed'] = true;
+            }
+            if ($branchId > 0) {
+                $filters['branch_id'] = $branchId;
+            }
+            $list = $this->productService->getProductsWithFilters($filters);
+            return response()->json($list);
+        }
+
+        // Otherwise, honor pagination for clients that request it explicitly
+        $products = $this->productService->getPaginatedProducts((int)$perPage);
         return response()->json($products);
     }
 
@@ -47,9 +71,15 @@ class ProductController extends Controller
             'stocks.*.price_override' => 'nullable|numeric|min:0',
         ]);
 
-        // Auto-generate slug if not provided
+        // Auto-generate unique slug if not provided
         if (!isset($validated['slug'])) {
-            $validated['slug'] = \Illuminate\Support\Str::slug($validated['name']);
+            $base = \Illuminate\Support\Str::slug($validated['name']);
+            $slug = $base;
+            $i = 2;
+            while (Product::withTrashed()->where('slug', $slug)->exists()) {
+                $slug = $base . '-' . $i++;
+            }
+            $validated['slug'] = $slug;
         }
 
         // Handle image uploads
@@ -117,9 +147,15 @@ class ProductController extends Controller
             'stocks.*.price_override' => 'nullable|numeric|min:0',
         ]);
 
-        // Auto-generate slug if not provided
+        // Auto-generate unique slug if not provided
         if (!isset($validated['slug']) && isset($validated['name'])) {
-            $validated['slug'] = \Illuminate\Support\Str::slug($validated['name']);
+            $base = \Illuminate\Support\Str::slug($validated['name']);
+            $slug = $base;
+            $i = 2;
+            while (Product::withTrashed()->where('slug', $slug)->where('id', '!=', $id)->exists()) {
+                $slug = $base . '-' . $i++;
+            }
+            $validated['slug'] = $slug;
         }
 
         // Handle image uploads

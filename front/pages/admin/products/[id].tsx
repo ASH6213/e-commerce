@@ -32,6 +32,7 @@ const EditProductPage = () => {
   const [branchPrices, setBranchPrices] = useState<Record<number, string>>({});
   const [branchPriceTouched, setBranchPriceTouched] = useState<Record<number, boolean>>({});
 
+  // Load categories and branches first
   useEffect(() => {
     const hasAdminCookie = !!getCookie("admin");
     if (!admin && !hasAdminCookie) {
@@ -39,14 +40,14 @@ const EditProductPage = () => {
       return;
     }
 
-    const loadAll = async () => {
+    const loadStaticData = async () => {
       // Load categories
       try {
         const res = await api.get(`/api/v1/categories`);
         const list = Array.isArray(res.data) ? res.data : [];
         setCategories(list.map((c: any) => ({ id: c.id, name: c.name })));
       } catch (e) {
-        console.error(e);
+        console.error("Failed to load categories:", e);
       }
 
       // Load branches
@@ -55,72 +56,79 @@ const EditProductPage = () => {
         const list = Array.isArray(res.data) ? res.data : [];
         setBranches(list.map((b: any) => ({ id: b.id, name: b.name, address: b.address })));
       } catch (e) {
-        console.error(e);
-      }
-
-      // Load product data
-      if (id) {
-        try {
-          const res = await api.get(`/api/v1/products/${id}`);
-          const p = res.data;
-          setFormData({
-            name: p.name ?? "",
-            description: p.description ?? "",
-            category_id: String(p.category_id ?? ""),
-            price: String(p.price ?? ""),
-            sale_price: p.sale_price != null ? String(p.sale_price) : "",
-            sku: p.sku ?? "",
-            is_active: !!p.is_active,
-            is_featured: !!p.is_featured,
-            images: Array.isArray(p.images) ? p.images : [],
-          });
-
-          // Prefill per-branch qty and price_override
-          try {
-            console.log(`[Edit Product] Fetching branch stocks for product ${id}`);
-            const stocksRes = await api.get(`/api/v1/admin/products/${id}/stocks`);
-            console.log("[Edit Product] Full API response:", stocksRes);
-            console.log("[Edit Product] Response status:", stocksRes.status);
-            console.log("[Edit Product] Response data:", stocksRes.data);
-            
-            const rows: Array<{ branch_id: number; quantity: number; price_override: number | null }> = stocksRes.data?.data || [];
-            console.log("[Edit Product] Parsed rows array:", rows);
-            console.log("[Edit Product] Number of rows:", rows.length);
-            
-            const qtyMap: Record<number, number> = {};
-            const priceMap: Record<number, string> = {};
-            
-            rows.forEach((r, index) => {
-              console.log(`[Edit Product] Processing row ${index}:`, r);
-              const qty = Number(r.quantity || 0);
-              qtyMap[r.branch_id] = qty;
-              console.log(`[Edit Product] Set quantity for branch ${r.branch_id} = ${qty}`);
-              
-              if (r.price_override !== null && r.price_override !== undefined) {
-                const priceStr = String(r.price_override);
-                priceMap[r.branch_id] = priceStr;
-                console.log(`[Edit Product] Set price for branch ${r.branch_id} = ${priceStr}`);
-              }
-            });
-            
-            console.log("[Edit Product] Final qtyMap:", qtyMap);
-            console.log("[Edit Product] Final priceMap:", priceMap);
-            console.log("[Edit Product] Setting state now...");
-            setBranchStocks(qtyMap);
-            setBranchPrices(priceMap);
-            console.log("[Edit Product] State set complete");
-          } catch (se: any) {
-            console.error("Failed to load branch stocks", se);
-            console.error("Error details:", se.response?.data || se.message);
-          }
-        } catch (e) {
-          console.error(e);
-        }
+        console.error("Failed to load branches:", e);
       }
     };
     
-    loadAll();
-  }, [id, admin, router]);
+    loadStaticData();
+  }, [admin, router]);
+
+  // Load product data after categories are loaded
+  useEffect(() => {
+    if (!id || categories.length === 0) return;
+
+    const loadProductData = async () => {
+      try {
+        const res = await api.get(`/api/v1/products/${id}`);
+        const p = res.data;
+        
+        console.log("[Edit Product] Loaded product data:", p);
+        console.log("[Edit Product] Category ID from API:", p.category_id);
+        console.log("[Edit Product] Category object from API:", p.category);
+        console.log("[Edit Product] Available categories:", categories);
+        
+        // Use category_id directly, fallback to category.id if not available
+        const categoryIdStr = p.category_id 
+          ? String(p.category_id) 
+          : (p.category?.id ? String(p.category.id) : "");
+        console.log("[Edit Product] Category ID as string:", categoryIdStr);
+        
+        setFormData({
+          name: p.name ?? "",
+          description: p.description ?? "",
+          category_id: categoryIdStr,
+          price: String(p.price ?? ""),
+          sale_price: p.sale_price != null ? String(p.sale_price) : "",
+          sku: p.sku ?? "",
+          is_active: !!p.is_active,
+          is_featured: !!p.is_featured,
+          images: Array.isArray(p.images) ? p.images : [],
+        });
+        
+        console.log("[Edit Product] FormData set with category_id:", categoryIdStr);
+
+        // Prefill per-branch qty and price_override
+        try {
+          console.log(`[Edit Product] Fetching branch stocks for product ${id}`);
+          const stocksRes = await api.get(`/api/v1/admin/products/${id}/stocks`);
+          
+          const rows: Array<{ branch_id: number; quantity: number; price_override: number | null }> = stocksRes.data?.data || [];
+          
+          const qtyMap: Record<number, number> = {};
+          const priceMap: Record<number, string> = {};
+          
+          rows.forEach((r) => {
+            const qty = Number(r.quantity || 0);
+            qtyMap[r.branch_id] = qty;
+            
+            if (r.price_override !== null && r.price_override !== undefined) {
+              priceMap[r.branch_id] = String(r.price_override);
+            }
+          });
+          
+          setBranchStocks(qtyMap);
+          setBranchPrices(priceMap);
+        } catch (se: any) {
+          console.error("Failed to load branch stocks", se);
+          console.error("Error details:", se.response?.data || se.message);
+        }
+      } catch (e) {
+        console.error("Failed to load product:", e);
+      }
+    };
+
+    loadProductData();
+  }, [id, categories.length]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -315,16 +323,23 @@ const EditProductPage = () => {
                 <select
                   id="category_id"
                   name="category_id"
-                  value={formData.category_id}
+                  value={formData.category_id || ""}
                   onChange={handleChange}
                   required
                   className="w-full px-4 py-2 border border-gray300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue focus:border-transparent"
                 >
                   <option value="">Select category</option>
                   {categories.map((c) => (
-                    <option key={c.id} value={String(c.id)}>{c.name}</option>
+                    <option key={c.id} value={String(c.id)}>
+                      {c.name} {String(c.id) === formData.category_id ? '✓' : ''}
+                    </option>
                   ))}
                 </select>
+                {formData.category_id && (
+                  <p className="text-xs text-gray400 mt-1">
+                    Selected ID: {formData.category_id}
+                  </p>
+                )}
               </div>
 
               <div>

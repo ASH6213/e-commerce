@@ -31,11 +31,12 @@ class AuthController extends Controller
 
             return response()->json($result, 201);
         } catch (\Exception $e) {
-            return response()->json([
-                'error' => [
-                    'message' => $e->getMessage(),
-                ],
-            ], 400);
+            $msg = $e->getMessage();
+            $payload = [ 'error' => [ 'message' => $msg ] ];
+            if (str_contains(strtolower($msg), 'already exists') || str_contains(strtolower($msg), 'already')) {
+                $payload['error']['type'] = 'alreadyExists';
+            }
+            return response()->json($payload, 400);
         }
     }
 

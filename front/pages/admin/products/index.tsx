@@ -29,35 +29,42 @@ const ProductsPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchId, setBranchId] = useState<string>("");
+  const [categoriesMap, setCategoriesMap] = useState<Record<number, string>>({});
 
   // Real-time updates - memoized callbacks
   const handleProductCreated = useCallback((product: any) => {
     console.log('New product created:', product.name);
+    const rawCreatedCatId: any = product.category_id ?? product.category?.id;
+    const catId: number | undefined = rawCreatedCatId != null && !isNaN(Number(rawCreatedCatId)) ? Number(rawCreatedCatId) : undefined;
+    const catName = product?.category?.name || product?.category_name || (catId != null ? categoriesMap[catId] : undefined);
     const mapped: Product = {
       id: product.id,
       image: Array.isArray(product.images) && product.images.length ? product.images[0] : null,
       name: product.name,
-      category: product?.category?.name,
+      category: catName,
       price: Number(product.sale_price ?? product.price ?? 0),
       stock: Number(product.stock ?? 0),
       status: product.is_active ? "Active" : "Inactive",
     };
     setProducts(prev => [mapped, ...prev]);
-  }, []);
+  }, [categoriesMap]);
 
   const handleProductUpdated = useCallback((product: any) => {
     console.log('Product updated:', product.name);
+    const rawUpdatedCatId: any = product.category_id ?? product.category?.id;
+    const catId: number | undefined = rawUpdatedCatId != null && !isNaN(Number(rawUpdatedCatId)) ? Number(rawUpdatedCatId) : undefined;
+    const catName = product?.category?.name || product?.category_name || (catId != null ? categoriesMap[catId] : undefined);
     const mapped: Product = {
       id: product.id,
       image: Array.isArray(product.images) && product.images.length ? product.images[0] : null,
       name: product.name,
-      category: product?.category?.name,
+      category: catName,
       price: Number(product.sale_price ?? product.price ?? 0),
       stock: Number(product.stock ?? 0),
       status: product.is_active ? "Active" : "Inactive",
     };
     setProducts(prev => prev.map(p => p.id === product.id ? mapped : p));
-  }, []);
+  }, [categoriesMap]);
 
   const handleProductDeleted = useCallback((productId: number) => {
     console.log('Product deleted:', productId);
@@ -66,17 +73,20 @@ const ProductsPage = () => {
 
   const handleProductStockUpdated = useCallback((product: any) => {
     console.log('Product stock updated:', product.name);
+    const rawStockCatId: any = product.category_id ?? product.category?.id;
+    const catId: number | undefined = rawStockCatId != null && !isNaN(Number(rawStockCatId)) ? Number(rawStockCatId) : undefined;
+    const catName = product?.category?.name || product?.category_name || (catId != null ? categoriesMap[catId] : undefined);
     const mapped: Product = {
       id: product.id,
       image: Array.isArray(product.images) && product.images.length ? product.images[0] : null,
       name: product.name,
-      category: product?.category?.name,
+      category: catName,
       price: Number(product.sale_price ?? product.price ?? 0),
       stock: Number(product.stock ?? 0),
       status: product.is_active ? "Active" : "Inactive",
     };
     setProducts(prev => prev.map(p => p.id === product.id ? mapped : p));
-  }, []);
+  }, [categoriesMap]);
 
   const { isSubscribed } = useRealtimeProducts({
     enabled: true,
@@ -108,6 +118,24 @@ const ProductsPage = () => {
     loadBranches();
   }, []);
 
+  // Load categories map once for reliable category display
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const { data } = await api.get(`/api/v1/categories`);
+        const list: any[] = Array.isArray(data) ? data : data?.data || [];
+        const map: Record<number, string> = {};
+        list.forEach((c: any) => {
+          if (c && typeof c.id === 'number') map[c.id] = c.name;
+        });
+        setCategoriesMap(map);
+      } catch (e) {
+        console.error("Failed to load categories:", e);
+      }
+    };
+    loadCategories();
+  }, []);
+
   // Load products dynamically (optionally by branch for price override)
   useEffect(() => {
     const load = async () => {
@@ -117,15 +145,20 @@ const ProductsPage = () => {
           params: branchId ? { branch_id: branchId } : undefined,
         });
         const list: any[] = Array.isArray(data) ? data : data?.data || [];
-        const mapped: Product[] = list.map((p: any) => ({
-          id: p.id,
-          image: Array.isArray(p.images) && p.images.length ? p.images[0] : null,
-          name: p.name,
-          category: p?.category?.name,
-          price: Number((p as any).effective_price ?? p.price ?? 0),
-          stock: Number(p.stock ?? 0),
-          status: p.is_active ? "Active" : "Inactive",
-        }));
+        const mapped: Product[] = list.map((p: any) => {
+          const rawCatId: any = p.category_id ?? p.category?.id;
+          const catId: number | undefined = rawCatId != null && !isNaN(Number(rawCatId)) ? Number(rawCatId) : undefined;
+          const catName = p?.category?.name || p?.category_name || (catId != null ? categoriesMap[catId] : undefined);
+          return {
+            id: p.id,
+            image: Array.isArray(p.images) && p.images.length ? p.images[0] : null,
+            name: p.name,
+            category: catName,
+            price: Number((p as any).effective_price ?? p.price ?? 0),
+            stock: Number(p.stock ?? 0),
+            status: p.is_active ? "Active" : "Inactive",
+          } as Product;
+        });
         setProducts(mapped);
       } catch (error) {
         console.error("Error fetching products:", error);
@@ -134,7 +167,7 @@ const ProductsPage = () => {
       }
     };
     load();
-  }, [branchId]);
+  }, [branchId, categoriesMap]);
 
   // Refresh list when tab regains focus or after in-app navigation
   useEffect(() => {
@@ -144,15 +177,20 @@ const ProductsPage = () => {
           params: branchId ? { branch_id: branchId } : undefined,
         });
         const list: any[] = Array.isArray(data) ? data : data?.data || [];
-        const mapped: Product[] = list.map((p: any) => ({
-          id: p.id,
-          image: Array.isArray(p.images) && p.images.length ? p.images[0] : null,
-          name: p.name,
-          category: p?.category?.name,
-          price: Number((p as any).effective_price ?? p.price ?? 0),
-          stock: Number(p.stock ?? 0),
-          status: p.is_active ? "Active" : "Inactive",
-        }));
+        const mapped: Product[] = list.map((p: any) => {
+          const rawCatId: any = p.category_id ?? p.category?.id;
+          const catId: number | undefined = rawCatId != null && !isNaN(Number(rawCatId)) ? Number(rawCatId) : undefined;
+          const catName = p?.category?.name || p?.category_name || (catId != null ? categoriesMap[catId] : undefined);
+          return {
+            id: p.id,
+            image: Array.isArray(p.images) && p.images.length ? p.images[0] : null,
+            name: p.name,
+            category: catName,
+            price: Number((p as any).effective_price ?? p.price ?? 0),
+            stock: Number(p.stock ?? 0),
+            status: p.is_active ? "Active" : "Inactive",
+          } as Product;
+        });
         setProducts(mapped);
       } catch (_) {}
     };
@@ -166,7 +204,7 @@ const ProductsPage = () => {
       window.removeEventListener('focus', onFocus);
       clearInterval(id);
     };
-  }, [branchId]);
+  }, [branchId, categoriesMap]);
 
   const filteredProducts = products.filter((product) =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -336,7 +374,7 @@ const ProductsPage = () => {
             <h2 className="text-2xl font-semibold text-gray500">All Products</h2>
             {isSubscribed && (
               <span className="text-xs px-2 py-1 bg-green bg-opacity-20 text-green rounded-full">
-                🟢 Live
+                Live
               </span>
             )}
           </div>
@@ -386,3 +424,6 @@ const ProductsPage = () => {
 };
 
 export default ProductsPage;
+
+
+

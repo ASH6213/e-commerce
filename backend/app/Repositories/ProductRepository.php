@@ -5,8 +5,10 @@ namespace App\Repositories;
 use App\Contracts\Repositories\ProductRepositoryInterface;
 use App\Models\Product;
 use App\Models\ProductBranchStock;
+use App\Models\ProductStockHold;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Schema;
 
 class ProductRepository implements ProductRepositoryInterface
 {
@@ -47,8 +49,16 @@ class ProductRepository implements ProductRepositoryInterface
 
     public function delete(int $id): bool
     {
-        $product = $this->model->find($id);
-        return $product ? $product->delete() : false;
+        // Include soft-deleted so repeated deletes don't error out for admins
+        $product = $this->model->withTrashed()->find($id);
+        if (!$product) {
+            return false;
+        }
+        if (method_exists($product, 'trashed') && $product->trashed()) {
+            // Already soft-deleted; treat as success for idempotency
+            return true;
+        }
+        return (bool) $product->delete();
     }
 
     public function getByCategory(int $categoryId): Collection
@@ -182,12 +192,28 @@ class ProductRepository implements ProductRepositoryInterface
             return false;
         }
         $pbs->quantity = max(0, $quantity);
-        return $pbs->save();
+        $ok = $pbs->save();
+
+        // Also recompute overall product stock as the sum of per-branch quantities
+        // so storefront stock stays in sync after branch-level changes (e.g., orders).
+        $product = $this->model->find($productId);
+        if ($product) {
+            $total = (int) ProductBranchStock::where('product_id', $productId)->sum('quantity');
+            $product->stock = $total;
+            $product->save();
+        }
+
+        return $ok;
     }
 
     public function getProductsWithFilters(array $filters = []): \Illuminate\Support\Collection
     {
         $query = $this->model->with(['category', 'branchStocks']);
+
+        // Include soft-deleted when explicitly requested (admin views)
+        if (!empty($filters['with_trashed'])) {
+            $query->withTrashed();
+        }
 
         // Only show active products to customers (unless explicitly requesting inactive)
         if (!isset($filters['is_active'])) {
@@ -228,6 +254,8 @@ class ProductRepository implements ProductRepositoryInterface
 
         // Apply branch-aware pricing/stock without hiding products for guests
         $branchId = (int) ($filters['branch_id'] ?? 0);
+        $hasHoldsTable = Schema::hasTable('product_stock_holds');
+
         if ($branchId > 0) {
             foreach ($products as $product) {
                 // Base price prefers sale_price if set
@@ -237,7 +265,15 @@ class ProductRepository implements ProductRepositoryInterface
                     if ($pbs->price_override !== null) {
                         $effective = (float) $pbs->price_override;
                     }
-                    $product->branch_stock = (int) ($pbs->quantity ?? 0);
+                    $held = 0;
+                    if ($hasHoldsTable) {
+                        $held = (int) ProductStockHold::where('product_id', $product->id)
+                            ->where('branch_id', $branchId)
+                            ->where('expires_at', '>', now())
+                            ->sum('quantity');
+                    }
+                    $available = max(0, (int) ($pbs->quantity ?? 0) - $held);
+                    $product->branch_stock = $available;
                 } else {
                     // No stock row for this branch means not available in this branch
                     $product->branch_stock = 0;
@@ -249,9 +285,56 @@ class ProductRepository implements ProductRepositoryInterface
             // No branch selected: still prefer sale_price if available
             foreach ($products as $product) {
                 $product->price = (float) ($product->sale_price ?? $product->price ?? 0);
+                // Expose available global stock after holds
+                $held = 0;
+                if ($hasHoldsTable) {
+                    $held = (int) ProductStockHold::where('product_id', $product->id)
+                        ->whereNull('branch_id')
+                        ->where('expires_at', '>', now())
+                        ->sum('quantity');
+                }
+                $product->stock = max(0, (int) $product->stock - $held);
             }
         }
 
         return $products;
+    }
+
+    /**
+     * Get available quantity for a product in a branch, subtracting active holds.
+     * If $excludeHoldKey is provided, holds with that key are ignored (for the current user's hold when confirming an order).
+     */
+    public function getAvailableBranchQuantity(int $productId, int $branchId, ?string $excludeHoldKey = null): int
+    {
+        $pbs = $this->getBranchStock($productId, $branchId);
+        if (!$pbs) { return 0; }
+        $holds = 0;
+        if (Schema::hasTable('product_stock_holds')) {
+            $holds = ProductStockHold::where('product_id', $productId)
+                ->where('branch_id', $branchId)
+                ->when($excludeHoldKey, function ($q) use ($excludeHoldKey) {
+                    $q->where('hold_key', '!=', $excludeHoldKey);
+                })
+                ->where('expires_at', '>', now())
+                ->sum('quantity');
+        }
+        return max(0, (int) $pbs->quantity - (int) $holds);
+    }
+
+    public function getAvailableGlobalQuantity(int $productId, ?string $excludeHoldKey = null): int
+    {
+        $product = $this->model->find($productId);
+        if (!$product) { return 0; }
+        $holds = 0;
+        if (Schema::hasTable('product_stock_holds')) {
+            $holds = ProductStockHold::where('product_id', $productId)
+                ->whereNull('branch_id')
+                ->when($excludeHoldKey, function ($q) use ($excludeHoldKey) {
+                    $q->where('hold_key', '!=', $excludeHoldKey);
+                })
+                ->where('expires_at', '>', now())
+                ->sum('quantity');
+        }
+        return max(0, (int) $product->stock - (int) $holds);
     }
 }

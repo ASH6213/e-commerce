@@ -6,6 +6,7 @@ use App\Services\Admin\AuthService;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class AdminAuthMiddleware
 {
@@ -15,7 +16,7 @@ class AdminAuthMiddleware
 
     public function handle(Request $request, Closure $next): JsonResponse|\Illuminate\Http\Response|\Illuminate\Http\RedirectResponse
     {
-        \Log::info('Admin auth middleware called', [
+        Log::info('Admin auth middleware called', [
             'path' => $request->path(),
             'method' => $request->method(),
         ]);
@@ -23,7 +24,7 @@ class AdminAuthMiddleware
         $token = $this->extractToken($request);
 
         if (!$token) {
-            \Log::warning('Admin auth failed: missing token', [
+            Log::warning('Admin auth failed: missing token', [
                 'path' => $request->path(),
                 'headers' => $request->headers->all(),
             ]);
@@ -34,11 +35,11 @@ class AdminAuthMiddleware
             ], 401);
         }
 
-        \Log::info('Token extracted', ['token_prefix' => substr($token, 0, 15)]);
+        Log::info('Token extracted', ['token_prefix' => substr($token, 0, 15)]);
 
         $admin = $this->auth->validateToken($token);
         if (!$admin) {
-            \Log::warning('Admin auth failed: invalid token', [
+            Log::warning('Admin auth failed: invalid token', [
                 'token_prefix' => substr($token, 0, 15),
             ]);
             return response()->json([
@@ -48,7 +49,7 @@ class AdminAuthMiddleware
             ], 401);
         }
 
-        \Log::info('Admin authenticated successfully', [
+        Log::info('Admin authenticated successfully', [
             'admin_id' => $admin->id,
             'admin_email' => $admin->email,
         ]);
@@ -89,4 +90,3 @@ class AdminAuthMiddleware
         return null;
     }
 }
-

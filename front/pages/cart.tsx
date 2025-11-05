@@ -147,13 +147,22 @@ const Cart = () => {
                                 −
                               </button>
                               <span className="w-8 text-center text-sm font-medium">{item.qty}</span>
-                              <button
-                                onClick={() => addOne!(item)}
-                                className="w-7 h-7 border border-gray300 rounded hover:bg-gray100 flex items-center justify-center text-sm"
-                                type="button"
-                              >
-                                +
-                              </button>
+                              {(() => {
+                                const max = typeof item.branch_stock === 'number' ? item.branch_stock : (typeof item.stock === 'number' ? item.stock : undefined);
+                                const disabled = typeof max === 'number' && item.qty! >= max;
+                                return (
+                                  <button
+                                    onClick={() => {
+                                      if (disabled) return;
+                                      addOne!(item);
+                                    }}
+                                    className={`w-7 h-7 border border-gray300 rounded flex items-center justify-center text-sm ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray100'}`}
+                                    type="button"
+                                  >
+                                    +
+                                  </button>
+                                );
+                              })()}
                             </div>
                             <button
                               onClick={() => deleteItem!(item)}

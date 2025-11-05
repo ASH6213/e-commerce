@@ -67,4 +67,16 @@ interface ProductRepositoryInterface
      * Get products with filters, ordering, and pagination
      */
     public function getProductsWithFilters(array $filters = []): \Illuminate\Support\Collection;
+
+    /**
+     * Get available quantity in a branch, subtracting active holds.
+     * If $excludeHoldKey is provided, holds with that key are excluded from the subtraction.
+     */
+    public function getAvailableBranchQuantity(int $productId, int $branchId, ?string $excludeHoldKey = null): int;
+
+    /**
+     * Get available global quantity (no branch), subtracting active holds.
+     * If $excludeHoldKey is provided, holds with that key are excluded from the subtraction.
+     */
+    public function getAvailableGlobalQuantity(int $productId, ?string $excludeHoldKey = null): int;
 }

@@ -121,6 +121,8 @@ export default function CartItem() {
                   <div className="itemContainer px-4 h-2/3 w-full flex-grow flex-shrink overflow-y-auto">
                     {cart.map((item) => {
                       subtotal += item.price * item.qty!;
+                      const max = typeof item.branch_stock === 'number' ? item.branch_stock : (typeof item.stock === 'number' ? item.stock : undefined);
+                      const canAddMore = !(typeof max === 'number' && item.qty! >= max);
                       return (
                         <Item
                           key={item.id}
@@ -128,7 +130,13 @@ export default function CartItem() {
                           price={item.price * item.qty!}
                           qty={item.qty!}
                           img={item.img1 as string}
-                          onAdd={() => addOne!(item)}
+                          canAddMore={canAddMore}
+                          onAdd={() => {
+                            if (!canAddMore) {
+                              return; // Prevent adding beyond available stock
+                            }
+                            addOne!(item);
+                          }}
                           onRemove={() => removeItem!(item)}
                           onDelete={() => deleteItem!(item)}
                         />

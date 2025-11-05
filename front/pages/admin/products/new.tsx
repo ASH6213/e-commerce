@@ -1,5 +1,6 @@
 import { useEffect, useState, FormEvent } from "react";
 import axios from "axios";
+import { api } from "../../../lib/api";
 import { useRouter } from "next/router";
 import AdminLayout from "../../../components/Admin/AdminLayout";
 import Button from "../../../components/Admin/Button";
@@ -126,17 +127,26 @@ const NewProductPage = () => {
         }
       });
 
-      const url = `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/admin/products`;
-      const headers: Record<string, string> = { "Content-Type": "multipart/form-data" };
-      if (admin?.token) {
-        headers["Authorization"] = `Bearer ${admin.token}`;
-      }
-
-      await axios.post(url, fd, { headers });
+      await api.post(`/api/v1/admin/products`, fd);
 
       router.push("/admin/products");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating product:", error);
+      const resp = error?.response;
+      const msg = resp?.data?.error?.message
+        || resp?.data?.message
+        || error?.message
+        || 'Failed to create product';
+      if (resp?.status === 422 && resp?.data?.errors) {
+        // Flatten Laravel validation errors
+        const details = Object.values(resp.data.errors as Record<string, string[]>)
+          .flat()
+          .join('\n');
+        alert(`${msg}\n\n${details}`);
+      } else {
+        alert(msg);
+      }
+    } finally {
       setLoading(false);
     }
   };

@@ -77,6 +77,7 @@ const Slideshow = () => {
                   width={1144}
                   height={572}
                   alt={"some name"}
+                  priority
                 />
               </div>
               <div className="hidden sm:block lg:hidden">
@@ -86,6 +87,7 @@ const Slideshow = () => {
                   width={820}
                   height={720}
                   alt={"some name"}
+                  priority
                 />
               </div>
               <div className="sm:hidden">
@@ -95,6 +97,7 @@ const Slideshow = () => {
                   width={428}
                   height={800}
                   alt={"some name"}
+                  priority
                 />
               </div>
               <div
